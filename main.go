@@ -13,30 +13,33 @@ import (
 )
 
 var cpuThreshold = flag.Float64("threshold", 100, "CPU threshold to alert on")
-var requiredTimesUnder = 8
+var requiredTimesUnder = flag.Int("times-under", 8, "number of readings under the threshold before deciding that your work is probably done")
+var sleepActive = flag.Duration("sleep-active", time.Second, "time to sleep between readings when waiting for work to end")
+var sleepPassive = flag.Duration("sleep-passive", time.Second * 5, "time to sleep between readings when waiting for work to start")
 
 func psCmdForPID(pid int) string {
 	return fmt.Sprintf("ps -p %d -o pcpu | tail +2", pid)
 }
 
 func notify(ctx context.Context, msg string) error {
-	// terminal-notifier -message basdf
 	cmd := exec.CommandContext(ctx, "terminal-notifier", "-message", msg)
 	return cmd.Run()
 
 }
 func main() {
-	if len(os.Args) != 2 {
-		log.Fatalf("Need exactly one arg (pid), got: %+v", os.Args[1:])
+	flag.Parse()
+
+	if len(flag.Args()) != 1 {
+		log.Fatalf("Need exactly one positional arg (pid), got: %+v", os.Args[1:])
 	}
-	pid, err := strconv.Atoi(os.Args[1])
+	pid, err := strconv.Atoi(flag.Args()[0])
 	if err != nil {
 		log.Fatalf("Error converting arg %s to int: %v", os.Args[1], err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	flag.Parse()
+
 
 	var timesUnder int
 	var overThreshold bool
@@ -60,15 +63,15 @@ func main() {
 			} else {
 				// we're still over the threshold, nothing to do
 			}
-			time.Sleep(time.Second) // zzz then check again
+			time.Sleep(*sleepActive) // zzz then check again
 		} else {
 			if overThreshold {
 				// We just crossed the threshold going down
 
 				// Make sure it's real
 				timesUnder += 1
-				if timesUnder >= requiredTimesUnder {
-					err = notify(ctx, "Okay Crossfire is ready for you!")
+				if timesUnder >= *requiredTimesUnder {
+					err = notify(ctx, "Okay, your thing is ready for you!")
 					if err != nil {
 						log.Fatalf("Error sending notification: %v", err)
 					}
@@ -78,7 +81,7 @@ func main() {
 			} else {
 				// we're still under the threshold, nothing to do
 			}
-			time.Sleep(time.Second * 3) // sleep for longer if nothing interesting is happening
+			time.Sleep(*sleepPassive)
 		}
 
 	}
